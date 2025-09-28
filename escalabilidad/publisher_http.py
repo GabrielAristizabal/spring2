@@ -1,74 +1,55 @@
-from flask import Flask, jsonify
-import pika, json, random, socket
-from pika.exceptions import AMQPConnectionError, ChannelClosedByBroker
+from flask import Flask, request, jsonify
+import pika
+import json
+import random
 
 app = Flask(__name__)
 
-# --- RabbitMQ ---
-rabbit_host = "IP_PRIVADA_BROKER"      # ej: 172.31.xx.yy
-rabbit_user = "monitoring_user"
-rabbit_password = "isis2503"
-exchange = "monitoring_measurements"
-topic = "ML.505.Pedidos"
+# Configuración RabbitMQ
+rabbit_host = "IP_PRIVADA_BROKER"      # Cambia por la IP privada de tu instancia Broker
+rabbit_user = "monitoring_user"        # Usuario RabbitMQ que creaste
+rabbit_password = "isis2503"           # Contraseña RabbitMQ
+exchange = "monitoring_measurements"   # Exchange configurado
+topic = "ML.505.Pedidos"               # Routing key / topic
 
-def publish_to_rabbit(payload: dict):
-    credentials = pika.PlainCredentials(rabbit_user, rabbit_password)
-    params = pika.ConnectionParameters(
-        host=rabbit_host,
-        credentials=credentials,
-        heartbeat=30,
-        blocked_connection_timeout=10,
-        connection_attempts=3,
-        retry_delay=1.0
-    )
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
-    # durable=True para que el exchange sobreviva reinicios (opcional)
-    channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
-    channel.basic_publish(exchange=exchange, routing_key=topic, body=json.dumps(payload))
-    connection.close()
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"}), 200
-
-@app.route("/diag", methods=["GET"])
-def diag():
-    """Prueba conexión a 5672 y publicación de prueba; NO usa JMeter."""
+def publicar_pedido(pedido):
+    """Abre conexión a RabbitMQ, publica mensaje y cierra conexión"""
     try:
-        # prueba de socket cruda (red/SG)
-        s = socket.create_connection((rabbit_host, 5672), timeout=3)
-        s.close()
-    except Exception as e:
-        return jsonify({"status":"error", "where":"tcp_connect", "detail": str(e)}), 503
+        credentials = pika.PlainCredentials(rabbit_user, rabbit_password)
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=rabbit_host, credentials=credentials)
+        )
+        channel = connection.channel()
 
-    try:
-        publish_to_rabbit({"ping":"ok"})
-        return jsonify({"status":"ok", "rabbit":"publish_ok"}), 200
-    except AMQPConnectionError as e:
-        return jsonify({"status":"error", "where":"amqp_connect", "detail": str(e)}), 503
-    except ChannelClosedByBroker as e:
-        return jsonify({"status":"error", "where":"channel_closed", "detail": str(e)}), 503
+        # Declarar exchange (asegura que existe)
+        channel.exchange_declare(exchange=exchange, exchange_type="topic")
+
+        # Publicar mensaje
+        channel.basic_publish(
+            exchange=exchange,
+            routing_key=topic,
+            body=json.dumps(pedido)
+        )
+
+        connection.close()
+        return True
     except Exception as e:
-        return jsonify({"status":"error", "where":"publish", "detail": str(e)}), 503
+        print(f"[!] Error publicando pedido: {e}")
+        return False
 
 @app.route("/pedido", methods=["POST"])
 def generar_pedido():
-    try:
-        n = random.randint(1, 10)
-        pedido = {"items": [f"item{random.randint(1,100)}" for _ in range(n)]}
-        publish_to_rabbit(pedido)
+    # Si llega un JSON, lo usamos; si no, generamos aleatorio
+    if request.is_json:
+        pedido = request.get_json()
+    else:
+        pedido = {"items": [f"item{random.randint(1,100)}" for _ in range(random.randint(1, 10))]}
+
+    if publicar_pedido(pedido):
         return jsonify({"status": "ok", "pedido": pedido}), 200
-    except AMQPConnectionError as e:
-        app.logger.exception("AMQP connection error")
-        return jsonify({"status":"error","where":"amqp_connect","detail": str(e)}), 503
-    except ChannelClosedByBroker as e:
-        app.logger.exception("Channel closed by broker")
-        return jsonify({"status":"error","where":"channel_closed","detail": str(e)}), 503
-    except Exception as e:
-        app.logger.exception("Generic publish error")
-        return jsonify({"status":"error","where":"publish","detail": str(e)}), 503
+    else:
+        return jsonify({"status": "error", "msg": "No se pudo enviar a RabbitMQ"}), 500
 
 if __name__ == "__main__":
-    # Abre puerto 5000 en el SG del Producer
+    # Escuchar en todas las interfaces en puerto 5000
     app.run(host="0.0.0.0", port=5000)
