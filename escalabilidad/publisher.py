@@ -1,16 +1,14 @@
-import pika
-import time
-import json
-import random
+from flask import Flask, jsonify
+import pika, json, random
 
-# --- Configuración RabbitMQ ---
-rabbit_host = "IP_PRIVADA_BROKER"       # IP privada de la instancia donde corre RabbitMQ
-rabbit_user = "monitoring_user"         # usuario que creaste en RabbitMQ
-rabbit_password = "isis2503"            # contraseña de ese usuario
-exchange = "monitoring_measurements"    # nombre del exchange
-topic = "ML.505.Pedidos"                # routing key para el exchange
+app = Flask(__name__)
 
-# --- Conexión al broker ---
+rabbit_host = "IP_PRIVADA_BROKER"
+rabbit_user = "monitoring_user"
+rabbit_password = "isis2503"
+exchange = "monitoring_measurements"
+topic = "ML.505.Pedidos"
+
 credentials = pika.PlainCredentials(rabbit_user, rabbit_password)
 connection = pika.BlockingConnection(
     pika.ConnectionParameters(host=rabbit_host, credentials=credentials)
@@ -18,17 +16,11 @@ connection = pika.BlockingConnection(
 channel = connection.channel()
 channel.exchange_declare(exchange=exchange, exchange_type="topic")
 
-print(" [*] Enviando pedidos... CTRL+C para salir")
-
-while True:
-    # Crear pedido con 1-10 ítems
+@app.route("/pedido", methods=["POST"])
+def generar_pedido():
     pedido = {"items": [f"item{random.randint(1,100)}" for _ in range(random.randint(1, 10))]}
-    
-    # Enviar a RabbitMQ
-    channel.basic_publish(
-        exchange=exchange,
-        routing_key=topic,
-        body=json.dumps(pedido)
-    )
-    print(" [x] Pedido enviado:", pedido)
-    time.sleep(3)  # enviar cada 3 segundos
+    channel.basic_publish(exchange=exchange, routing_key=topic, body=json.dumps(pedido))
+    return jsonify({"status": "ok", "pedido": pedido})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
