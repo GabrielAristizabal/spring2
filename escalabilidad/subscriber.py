@@ -1,22 +1,20 @@
-# subscriber.py
 import pika
 import pymysql
 import json
 
-# --- Configuración de RabbitMQ ---
-rabbit_host = "IP_PRIVADA_BROKER"   # la IP privada de tu instancia broker-instance
-rabbit_user = "monitoring_user"     # creado con rabbitmqctl add_user
-rabbit_password = "isis2503"        # la clave que definiste
-
+# --- Configuración RabbitMQ ---
+rabbit_host = "IP_PRIVADA_BROKER"       # IP privada del broker
+rabbit_user = "monitoring_user"
+rabbit_password = "isis2503"
 exchange = "monitoring_measurements"
-topic = "ML.505.#"  # escucha cualquier mensaje del salón ML.505 (puedes adaptarlo)
+topic = "ML.505.#"                      # escucha todo lo que venga de ML.505
 
-# --- Configuración de la base de datos ---
+# --- Configuración Base de Datos ---
 db = pymysql.connect(
-    host="TU-ENDPOINT-RDS",   # Endpoint RDS
-    user="admin",             # usuario maestro
-    password="TU_PASSWORD",   # contraseña RDS
-    database="pedidosdb"      # base de datos que creaste
+    host="ENDPOINT_RDS",     # Endpoint de tu base de datos MySQL en RDS
+    user="admin",            # Usuario maestro
+    password="TU_PASSWORD",  # Contraseña
+    database="pedidosdb"     # Nombre de la base que creaste
 )
 cursor = db.cursor()
 
@@ -26,32 +24,26 @@ connection = pika.BlockingConnection(
     pika.ConnectionParameters(host=rabbit_host, credentials=credentials)
 )
 channel = connection.channel()
-
-# Declarar el exchange (tipo topic según guía)
 channel.exchange_declare(exchange=exchange, exchange_type="topic")
 
-# Crear cola exclusiva temporal para este subscriber
+# Declarar cola temporal exclusiva
 result = channel.queue_declare(queue="", exclusive=True)
 queue_name = result.method.queue
 
-# Vincular la cola al exchange con el topic deseado
+# Vincular cola al exchange
 channel.queue_bind(exchange=exchange, queue=queue_name, routing_key=topic)
 
 print(" [*] Esperando mensajes de RabbitMQ...")
 
 def callback(ch, method, properties, body):
-    print(f" [x] Recibido: {body.decode()}")
-    try:
-        data = json.loads(body.decode().replace("'", "\""))  # convierte payload en JSON
-        valor = data.get("value")
-        unidad = data.get("unit")
+    pedido = json.loads(body.decode())
+    print(f" [x] Recibido: {pedido}")
 
-        sql = "INSERT INTO pedidos (items) VALUES (%s)"
-        cursor.execute(sql, (json.dumps({"valor": valor, "unidad": unidad}),))
-        db.commit()
-        print(" [x] Insertado en MySQL")
-    except Exception as e:
-        print(" [!] Error procesando mensaje:", e)
+    # Insertar en la base MySQL
+    sql = "INSERT INTO pedidos (items) VALUES (%s)"
+    cursor.execute(sql, (json.dumps(pedido["items"]),))
+    db.commit()
+    print(" [x] Pedido insertado en MySQL")
 
 channel.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=True)
 channel.start_consuming()
