@@ -1,34 +1,46 @@
+# subscriber.py
 import boto3
+import pymysql
 import json
 import time
 
-REGION = "us-east-1"
+# Configura la cola SQS
 QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/PedidosQueue"
+sqs = boto3.client("sqs", region_name="us-east-1")
 
-sqs = boto3.client("sqs", region_name=REGION)
+# Configura conexión a RDS MySQL
+db = pymysql.connect(
+    host="tu-endpoint-rds.amazonaws.com",
+    user="admin",
+    password="tu_password",
+    database="pedidosdb"
+)
+
+cursor = db.cursor()
 
 def procesar_pedido(pedido):
-    print("✅ Procesando pedido:", pedido)
-    time.sleep(0.2)
+    sql = "INSERT INTO pedidos (items) VALUES (%s)"
+    cursor.execute(sql, (json.dumps(pedido["items"]),))
+    db.commit()
+    print("Pedido guardado:", pedido)
 
-def recibir_mensajes():
-    while True:
-        response = sqs.receive_message(
-            QueueUrl=QUEUE_URL,
-            MaxNumberOfMessages=10,
-            WaitTimeSeconds=5
-        )
-        if "Messages" in response:
-            for msg in response["Messages"]:
-                body = json.loads(msg["Body"])
-                pedido = json.loads(body["Message"])
-                procesar_pedido(pedido)
-                sqs.delete_message(
-                    QueueUrl=QUEUE_URL,
-                    ReceiptHandle=msg["ReceiptHandle"]
-                )
-        else:
-            time.sleep(1)
+while True:
+    # Recibir mensajes de SQS
+    resp = sqs.receive_message(
+        QueueUrl=QUEUE_URL,
+        MaxNumberOfMessages=10,   # hasta 10 pedidos a la vez
+        WaitTimeSeconds=10        # long polling
+    )
 
-if __name__ == "__main__":
-    recibir_mensajes()
+    if "Messages" in resp:
+        for msg in resp["Messages"]:
+            pedido = json.loads(msg["Body"])
+            procesar_pedido(pedido)
+
+            # Borrar mensaje de la cola después de procesarlo
+            sqs.delete_message(
+                QueueUrl=QUEUE_URL,
+                ReceiptHandle=msg["ReceiptHandle"]
+            )
+    else:
+        time.sleep(1)  # esperar un poco si no hay mensajes
