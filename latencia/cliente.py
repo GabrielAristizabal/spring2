@@ -1,22 +1,24 @@
-import requests, time
+  GNU nano 7.2                                                            cliente.py                                                                     
+import requests
 
-URL = "http://balanceador-952015566.us-east-1.elb.amazonaws.com"  # ← pon tu DNS con esquema
+# Reemplaza con el DNS público del ALB + endpoint
+URL = "http://balanceador-952015566.us-east-1.elb.amazonaws.com/pedido"
 
-def fetch_json(url, tries=3, timeout=5):
-    for _ in range(tries):
-        r = requests.get(url, timeout=timeout, headers={"Accept": "application/json"})
-        if r.ok and r.headers.get("Content-Type","").startswith("application/json"):
-            return r.json()
-        time.sleep(0.2)  # backoff corto
-    # Si llega aquí, algo está mal en infraestructura; devolvemos None sin spam
-    return None
+def main():
+    try:
+        r = requests.get(URL, timeout=5, headers={"Accept": "application/json"})
+        print("Status code:", r.status_code)
+        print("Respuesta cruda:", r.text)
+        if r.ok and r.headers.get("Content-Type", "").startswith("application/json"):
+            print("JSON parseado:", r.json())
+    except Exception as e:
+        print("❌ Excepción al llamar al ALB:", e)
 
-for i in range(10):
-    data = fetch_json(URL)
-    if data is not None:
-        print(f"Respuesta {i+1}: {data}")
-    else:
-        # Un único mensaje claro si falla tras reintentos
-        print(f"Respuesta {i+1}: Error al obtener JSON (revisa ALB/health checks/SG)")
+if __name__ == "__main__":
+    main()
+
+
+
+
 
 
