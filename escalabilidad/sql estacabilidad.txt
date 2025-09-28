@@ -1,0 +1,8 @@
+CREATE DATABASE IF NOT EXISTS pedidos_db;
+USE pedidos_db;
+
+CREATE TABLE pedidos (
+    pedido_id INT PRIMARY KEY,
+    items JSON NOT NULL,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
