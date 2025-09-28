@@ -1,33 +1,34 @@
-import boto3
-import random
-import json
+import pika
 import time
+import json
+import random
 
-# Configuración AWS
-REGION = "us-east-1"  # cámbialo si tu región es diferente
-TOPIC_ARN = "link de ARN de SNS"
+# --- Configuración RabbitMQ ---
+rabbit_host = "IP_PRIVADA_BROKER"       # IP privada de la instancia donde corre RabbitMQ
+rabbit_user = "monitoring_user"         # usuario que creaste en RabbitMQ
+rabbit_password = "isis2503"            # contraseña de ese usuario
+exchange = "monitoring_measurements"    # nombre del exchange
+topic = "ML.505.Pedidos"                # routing key para el exchange
 
-sns = boto3.client("sns", region_name=REGION)
+# --- Conexión al broker ---
+credentials = pika.PlainCredentials(rabbit_user, rabbit_password)
+connection = pika.BlockingConnection(
+    pika.ConnectionParameters(host=rabbit_host, credentials=credentials)
+)
+channel = connection.channel()
+channel.exchange_declare(exchange=exchange, exchange_type="topic")
 
-def crear_pedido():
-    n_items = random.randint(1, 10)
-    pedido = {
-        "pedido_id": random.randint(1000, 9999),
-        "items": [f"item_{i}" for i in range(n_items)]
-    }
-    return pedido
+print(" [*] Enviando pedidos... CTRL+C para salir")
 
-def publicar_pedido():
-    pedido = crear_pedido()
-    response = sns.publish(
-        TopicArn=TOPIC_ARN,
-        Message=json.dumps(pedido),
-        Subject="NuevoPedido"
+while True:
+    # Crear pedido con 1-10 ítems
+    pedido = {"items": [f"item{random.randint(1,100)}" for _ in range(random.randint(1, 10))]}
+    
+    # Enviar a RabbitMQ
+    channel.basic_publish(
+        exchange=exchange,
+        routing_key=topic,
+        body=json.dumps(pedido)
     )
-    print("📦 Pedido publicado:", pedido)
-    return response
-
-if __name__ == "__main__":
-    for _ in range(5):  # ejemplo: publica 5 pedidos
-        publicar_pedido()
-        time.sleep(1)
+    print(" [x] Pedido enviado:", pedido)
+    time.sleep(3)  # enviar cada 3 segundos
